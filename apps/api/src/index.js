@@ -1,9 +1,19 @@
 import cors from "cors";
 import crypto from "crypto";
+import dotenv from "dotenv";
 import express from "express";
+import path from "path";
+import { fileURLToPath } from "url";
 import { z } from "zod";
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.join(__dirname, "..", ".env") });
+
 const app = express();
+
+const DEFAULT_SYSTEM_PROMPT =
+  "You are a helpful assistant. Answer clearly and concisely. If you are unsure, say you are unsure.";
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
@@ -34,7 +44,7 @@ app.post("/chat", async (req, res) => {
       });
     }
 
-    const apiKey = process.env.DEEPSEEK_API_KEY;
+    const apiKey = process.env.DEEPSEEK_API_KEY?.trim().replace(/^['"]|['"]$/g, "");
     if (!apiKey) {
       return res.status(500).json({
         code: "MISSING_API_KEY",
@@ -59,7 +69,13 @@ app.post("/chat", async (req, res) => {
       body: JSON.stringify({
         model: process.env.DEEPSEEK_MODEL ?? "deepseek-chat",
         stream: false,
-        messages: parsed.data.messages
+        messages: [
+          {
+            role: "system",
+            content: process.env.SYSTEM_PROMPT ?? DEFAULT_SYSTEM_PROMPT
+          },
+          ...parsed.data.messages
+        ]
       }),
       signal: controller.signal
     }).finally(() => {

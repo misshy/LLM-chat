@@ -42,6 +42,20 @@ export default function Page() {
       });
 
       if (!res.ok) {
+        const contentType = res.headers.get("content-type") ?? "";
+        if (contentType.includes("application/json")) {
+          const errJson = (await res.json()) as Partial<ApiChatResponse> & {
+            code?: string;
+            message?: string;
+            requestId?: string;
+          };
+          
+          if (typeof errJson.requestId === "string" && errJson.requestId.length > 0) {
+            setLastRequestId(errJson.requestId);
+          }
+          throw new Error(errJson.message || errJson.code || `HTTP ${res.status}`);
+        }
+
         const errText = await res.text();
         throw new Error(errText || `HTTP ${res.status}`);
       }
