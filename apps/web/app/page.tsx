@@ -10,6 +10,8 @@ type ChatMessage = {
 type ApiChatResponse = {
   message: string;
   requestId: string;
+  model?: string;
+  latencyMs?: number;
 };
 
 export default function Page() {
@@ -20,6 +22,7 @@ export default function Page() {
   const [isSending, setIsSending] = useState(false);
   const [lastRequestId, setLastRequestId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const pendingIdRef = useRef<string | null>(null);
 
   const canSend = useMemo(() => input.trim().length > 0 && !isSending, [input, isSending]);
 
@@ -31,14 +34,26 @@ export default function Page() {
     setIsSending(true);
     setLastRequestId(null);
 
+    pendingIdRef.current = crypto.randomUUID();
+    const pendingId = pendingIdRef.current;
+
     setMessages((prev) => [...prev, { role: "user", content: text }]);
+    setMessages((prev) => [...prev, { role: "assistant", content: "…" }]);
+
+    requestAnimationFrame(() => {
+      listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
+    });
 
     try {
       const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
       const res = await fetch(`${apiBaseUrl.replace(/\/+$/, "")}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: [...messages, { role: "user", content: text }] })
+        body: JSON.stringify({
+          messages: [...messages, { role: "user", content: text }],
+          temperature: 0.7,
+          max_tokens: 512
+        })
       });
 
       if (!res.ok) {
@@ -62,17 +77,38 @@ export default function Page() {
 
       const data = (await res.json()) as ApiChatResponse;
       setLastRequestId(data.requestId);
-      setMessages((prev) => [...prev, { role: "assistant", content: data.message }]);
+      setMessages((prev) => {
+        const next = [...prev];
+        const lastIdx = next.length - 1;
+        if (lastIdx >= 0 && next[lastIdx]?.role === "assistant" && next[lastIdx]?.content === "…") {
+          next[lastIdx] = { role: "assistant", content: data.message };
+          return next;
+        }
+        return [...prev, { role: "assistant", content: data.message }];
+      });
 
       requestAnimationFrame(() => {
         listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Unknown error";
-      setMessages((prev) => [...prev, { role: "assistant", content: `请求失败：${msg}` }]);
+      setMessages((prev) => {
+        const next = [...prev];
+        const lastIdx = next.length - 1;
+        if (lastIdx >= 0 && next[lastIdx]?.role === "assistant" && next[lastIdx]?.content === "…") {
+          next[lastIdx] = { role: "assistant", content: `请求失败：${msg}` };
+          return next;
+        }
+        return [...prev, { role: "assistant", content: `请求失败：${msg}` }];
+      });
     } finally {
       setIsSending(false);
     }
+  }
+
+  function onCopyRequestId() {
+    if (!lastRequestId) return;
+    navigator.clipboard.writeText(lastRequestId).catch(() => {});
   }
 
   return (
@@ -83,6 +119,12 @@ export default function Page() {
         {lastRequestId ? (
           <>
             ，requestId：<code>{lastRequestId}</code>
+            <button
+              onClick={onCopyRequestId}
+              style={{ marginLeft: 8, padding: "2px 8px", border: "1px solid #ddd", borderRadius: 8 }}
+            >
+              复制
+            </button>
           </>
         ) : null}
       </div>
@@ -129,6 +171,13 @@ export default function Page() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
+            const native = e.nativeEvent as KeyboardEvent;
+            const isComposing = "isComposing" in native ? native.isComposing : false;
+            if (e.key === "Enter" && !e.shiftKey && !isComposing) {
+              e.preventDefault();
+              onSend();
+              return;
+            }
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               onSend();
             }

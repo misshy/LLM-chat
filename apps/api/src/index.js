@@ -28,7 +28,9 @@ const ChatRequestSchema = z.object({
       role: z.enum(["user", "assistant"]),
       content: z.string().min(1)
     })
-  )
+  ),
+  temperature: z.number().min(0).max(2).optional(),
+  max_tokens: z.number().int().positive().max(8192).optional()
 });
 
 app.post("/chat", async (req, res) => {
@@ -54,6 +56,7 @@ app.post("/chat", async (req, res) => {
     }
 
     const baseUrl = (process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com").replace(/\/+$/, "");
+    const model = process.env.DEEPSEEK_MODEL ?? "deepseek-chat";
 
     const controller = new AbortController();
     const timeoutMs = Number(process.env.DEEPSEEK_TIMEOUT_MS ?? 20000);
@@ -67,8 +70,10 @@ app.post("/chat", async (req, res) => {
         Authorization: `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: process.env.DEEPSEEK_MODEL ?? "deepseek-chat",
+        model,
         stream: false,
+        temperature: parsed.data.temperature,
+        max_tokens: parsed.data.max_tokens,
         messages: [
           {
             role: "system",
@@ -107,8 +112,9 @@ app.post("/chat", async (req, res) => {
 
     res.setHeader("x-request-id", requestId);
     res.setHeader("x-latency-ms", String(latencyMs));
+    res.setHeader("x-model", model);
 
-    return res.json({ message, requestId });
+    return res.json({ message, requestId, model, latencyMs });
   } catch (err) {
     console.error(`[${requestId}] /chat error`, err);
     return res.status(500).json({
